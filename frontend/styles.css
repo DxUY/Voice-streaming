@@ -1,0 +1,674 @@
+/* Global Styles */
+:root {
+    --primary-color: #0d6efd;
+    --secondary-color: #6c757d;
+    --success-color: #198754;
+    --danger-color: #dc3545;
+    --info-color: #0dcaf0;
+    --sidebar-bg: #f8f9fa;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f5f5;
+    overflow-x: hidden;
+}
+
+/* Navbar */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+    padding: 1rem 0;
+    z-index: 1030;
+}
+
+.navbar-brand {
+    font-size: 1.3rem;
+    font-weight: 600;
+}
+
+/* Sidebar */
+.sidebar {
+    position: fixed;
+    top: 56px;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    padding: 0;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid #dee2e6;
+    overflow-y: auto;
+}
+
+.sidebar-sticky {
+    position: relative;
+    top: 0;
+    height: calc(100vh - 56px);
+    padding-top: 0.5rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.sidebar .nav-link {
+    font-weight: 500;
+    color: #333;
+    padding: 0.75rem 1rem;
+    transition: all 0.3s;
+}
+
+.sidebar .nav-link:hover {
+    background-color: #e9ecef;
+    color: var(--primary-color);
+}
+
+.sidebar .nav-link.active {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.sidebar-heading {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Main Content */
+main {
+    margin-top: 56px;
+    padding-top: 1rem;
+}
+
+@media (min-width: 768px) {
+    main {
+        margin-left: 0;
+    }
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+}
+
+.card-header {
+    border-bottom: none;
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+}
+
+/* Upload Area */
+.upload-area {
+    border: 3px dashed #dee2e6;
+    border-radius: 10px;
+    padding: 3rem 2rem;
+    text-align: center;
+    background-color: #fafafa;
+    cursor: pointer;
+    transition: all 0.3s;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.upload-area:hover {
+    border-color: var(--primary-color);
+    background-color: #f0f8ff;
+}
+
+.upload-area.dragover {
+    border-color: var(--success-color);
+    background-color: #e7f9f0;
+}
+
+/* Record Area */
+.record-area {
+    border: 3px solid #dee2e6;
+    border-radius: 10px;
+    padding: 3rem 2rem;
+    text-align: center;
+    background-color: #fafafa;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.recording-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+#recordBtn.recording {
+    background-color: #dc3545;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Recording Icon Animation - Only when sound detected */
+#recordIcon.active {
+    animation: microphonePulse 0.3s ease-in-out;
+    color: #dc3545 !important;
+    filter: drop-shadow(0 0 15px rgba(220, 53, 69, 0.8));
+}
+
+@keyframes microphonePulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.15);
+    }
+}
+
+/* Recording Timer */
+.recording-timer {
+    display: inline-block;
+    font-size: 1.8rem;
+    font-weight: bold;
+    color: #6c757d;
+    font-family: 'Courier New', monospace;
+    padding: 0.5rem 1.5rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 2px solid #dee2e6;
+}
+
+.recording-timer.active {
+    color: #dc3545;
+    border-color: #dc3545;
+    animation: timerPulse 1s infinite;
+}
+
+@keyframes timerPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(220, 53, 69, 0);
+    }
+}
+
+/* Audio Player */
+#waveform {
+    width: 100%;
+    height: 128px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.audio-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+}
+
+.audio-controls button {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+}
+
+/* Results */
+.result-box {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.result-content {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 1.5rem;
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+    line-height: 1.8;
+}
+
+.result-content p {
+    margin-bottom: 1rem;
+}
+
+.result-content ul {
+    padding-left: 1.5rem;
+}
+
+.result-content li {
+    margin-bottom: 0.75rem;
+}
+
+/* Tabs */
+.nav-tabs {
+    border-bottom: 2px solid #dee2e6;
+}
+
+.nav-tabs .nav-link {
+    color: #6c757d;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.nav-tabs .nav-link:hover {
+    border: none;
+    color: var(--primary-color);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--primary-color);
+    background-color: transparent;
+    border: none;
+    border-bottom: 3px solid var(--primary-color);
+}
+
+/* Progress Bar */
+#uploadProgress {
+    height: 30px;
+    border-radius: 15px;
+    overflow: hidden;
+    background-color: #e9ecef;
+}
+
+#uploadProgress .progress-bar {
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 30px;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 8px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+/* Badges */
+.badge {
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    border-radius: 20px;
+}
+
+/* Volume Control */
+.form-range {
+    vertical-align: middle;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Loading Animation */
+.spinner-border {
+    width: 2rem;
+    height: 2rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        position: relative;
+        top: 0;
+    }
+    
+    main {
+        margin-left: 0;
+        margin-top: 0;
+    }
+    
+    .upload-area, .record-area {
+        min-height: 250px;
+        padding: 2rem 1rem;
+    }
+    
+    .audio-controls {
+        flex-wrap: wrap;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+/* Toast Notifications */
+.toast-container {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 1050;
+}
+
+/* Utility Classes */
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}
+
+.no-select {
+    user-select: none;
+}
+
+/* Save Recording Modal */
+#saveRecordingModal .modal-content {
+    border-radius: 15px;
+    border: none;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+#saveRecordingModal .modal-header {
+    border-radius: 15px 15px 0 0;
+    padding: 1.25rem 1.5rem;
+}
+
+#saveRecordingModal .modal-body {
+    padding: 1.5rem;
+}
+
+#saveRecordingModal .form-control {
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 2px solid #dee2e6;
+    transition: all 0.3s;
+}
+
+#saveRecordingModal .form-control:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+}
+
+#saveRecordingModal .alert-info {
+    background-color: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 8px;
+}
+
+#saveRecordingModal .modal-footer {
+    border-top: 1px solid #dee2e6;
+    padding: 1rem 1.5rem;
+}
+
+#previewName {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+
+/* Responsive: Trên điện thoại thì full màn hình */
+@media (max-width: 576px) {
+    .chat-sidebar {
+        width: 100%;
+        right: -100%;
+    }
+}
+
+/* Chỉnh lại bong bóng chat cho gọn trong sidebar hẹp */
+.message {
+    max-width: 90%; 
+    font-size: 0.9rem;
+}
+
+/* --- ESP32 LIVE MONITOR STYLES --- */
+.live-monitor-card {
+    border: 1px solid #dee2e6;
+}
+
+.realtime-box {
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 1.5rem;
+    min-height: 150px;
+    line-height: 1.6;
+    font-size: 1rem;
+    color: #212529;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* Con trỏ nhấp nháy */
+.realtime-box .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1rem;
+    background-color: #0d6efd; /* xanh bootstrap */
+    animation: blinkCursor 1s infinite;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+@keyframes blinkCursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+/* --- LIVE MIC VISUAL --- */
+.mic-container {
+    height: 120px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.mic-icon {
+    font-size: 4rem;
+    color: #6c757d;
+    transition: all 0.3s ease;
+}
+
+/* Khi có âm thanh */
+.mic-icon.active {
+    color: #dc3545;
+    animation: micPulse 0.6s infinite;
+    filter: drop-shadow(0 0 15px rgba(220, 53, 69, 0.7));
+}
+
+@keyframes micPulse {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+#liveMic {
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+#liveMic.active {
+    box-shadow: 0 0 20px rgba(0, 255, 0, 0.7);
+}
+
+/* --- AUDIO COMPARISON WAVEFORMS --- */
+.waveform-container {
+    width: 100%;
+    height: 8px; /* Very slim like YouTube progress bar */
+    background-color: #f8f9fa;
+    border-radius: 4px; /* Smaller radius for slim bar */
+    overflow: hidden;
+    border: 1px solid #dee2e6; /* Thinner border */
+    cursor: pointer; /* Show it's clickable */
+    transition: transform 0.1s ease;
+}
+
+.waveform-container:hover {
+    transform: scaleY(1.5); /* Slightly expand on hover like YouTube */
+}
+
+#originalWaveform {
+    border-color: #6c757d;
+}
+
+#processedWaveform {
+    border-color: #28a745;
+}
+
+#audioComparisonSection .col-md-6 {
+    position: relative;
+}
+
+#audioComparisonSection h6 {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+#audioComparisonSection .btn-sm {
+    padding: 0.4rem 1rem;
+    font-size: 0.875rem;
+}
+
+/* --- HISTORY VIEW STYLES --- */
+.history-date-group {
+    margin-bottom: 2rem;
+}
+
+.history-date-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+    box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.3s ease;
+}
+
+.history-date-header:hover {
+    box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
+    transform: translateX(5px);
+}
+
+.history-date-header i.fa-chevron-right,
+.history-date-header i.fa-chevron-down {
+    transition: transform 0.3s ease;
+}
+
+.date-recordings {
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.history-item {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.history-item:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+    border-color: #0d6efd;
+    background: #f8f9ff;
+}
+
+.history-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.history-item-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #333;
+    margin: 0 0 0.25rem 0;
+}
+
+.history-item-time {
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+
+.history-item-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.history-item-actions .btn {
+    font-size: 0.875rem;
+    padding: 0.4rem 1rem;
+}
+
+#historyContainer .text-muted {
+    padding: 3rem;
+}
