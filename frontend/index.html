@@ -3,174 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Processing Dashboard</title>
-    
+    <title>Audio Processing System</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
     <link rel="stylesheet" href="styles.css">
-    <style>
-        /* CSS specifically for the live canvas rendering */
-        .waveform-live-container {
-            background: #000;
-            border-radius: 4px;
-            overflow: hidden;
-            border: 1px solid #333;
-        }
-        #liveWaveformCanvas {
-            display: block;
-            width: 100%;
-            height: 200px;
-        }
-    </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top shadow-sm">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <i class="fas fa-microphone-alt me-2"></i>
-                Audio Processing System
+    <nav class="navbar navbar-expand navbar-dark bg-primary sticky-top">
+        <div class="container-fluid px-5">
+            <a class="navbar-brand" onclick="showDashboard(event)">
+                <i class="fas fa-microchip me-3"></i>Audio Processing System
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="collapse navbar-collapse">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="#" onclick="showDashboard(event)"><i class="fas fa-home me-1"></i>Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#" id="historyNavLink" onclick="showHistory(event)"><i class="fas fa-history me-1"></i>History</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#"><i class="fas fa-cog me-1"></i>Settings</a>
-                    </li>
+                    <li class="nav-item px-3"><a class="nav-link active" id="nav-dash" onclick="showDashboard(event)">Dashboard</a></li>
+                    <li class="nav-item px-3"><a class="nav-link" id="nav-hist" onclick="showHistory(event)">History</a></li>
+                    <li class="nav-item px-3"><a class="nav-link" id="nav-settings" onclick="showSettings(event)">Settings</a></li>
                 </ul>
             </div>
         </div>
     </nav>
 
     <div class="container-fluid">
-        <div class="row">       
-            <main class="col-12 px-md-4">
-                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                    <h1 class="h2" id="pageTitle">Audio Processing Dashboard</h1>
-                    <div class="btn-toolbar mb-2 mb-md-0">
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="testDisplayResults()">
-                            <i class="fas fa-flask me-1"></i>Test Results
-                        </button>
+        <main>
+            <div id="dashboard-view">
+                <div id="dashboardHeader" class="pt-4 pb-3 mb-4 border-bottom">
+                    <h1 class="display-6 fw-bold">Live Stream Monitor</h1>
+                    <p class="text-muted mb-0">Real-time digital signal processing (DSP) status</p>
+                </div>
+
+                <div class="row mb-5" id="liveMonitorSection">
+                    <div class="col-12">
+                        <div class="card shadow-lg no-hover">
+                            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">LIVE OSCILLOSCOPE FEED</h5>
+                                <div id="connectionStatus" class="badge bg-secondary">INITIALIZING...</div>
+                            </div>
+                            <div class="card-body p-0 waveform-live-container">
+                                <canvas id="liveWaveformCanvas"></canvas>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div id="dashboard-view">
-                    
-                    <div class="row mb-4" id="liveMonitorSection">
-                        <div class="col-12">
-                            <div class="card shadow-sm border-0">
-                                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                                    <h5 class="mb-0 small text-uppercase tracking-wider">
-                                        <i class="fas fa-wave-square me-2 text-primary"></i>Live Audio Stream
-                                    </h5>
-                                    <span id="connectionStatus" class="badge bg-secondary">Waiting for Signal</span>
-                                </div>
-                                
-                                <div class="card-body p-0 bg-black">
-                                    <div class="waveform-live-container">
-                                        <canvas id="liveWaveformCanvas"></canvas>
+                <div class="row mb-5" id="audioComparisonSection" style="display: none;">
+                    <div class="col-12">
+                        <div class="card shadow-sm no-hover">
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0">A/B Comparison Playback</h5>
+                            </div>
+                            <div class="card-body p-4">
+                                <div class="row g-5">
+                                    <div class="col-6 border-end text-center">
+                                        <h6 class="text-start small fw-bold">RAW INPUT DATA</h6>
+                                        <div id="originalWaveform" class="waveform-container"></div>
+                                        <button id="btn-play-original" class="btn btn-outline-primary mt-3" onclick="toggleOriginalPlay()">
+                                            <i class="fas fa-play me-2"></i><span>Play Raw</span>
+                                        </button>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row mb-3" id="fileNameSection" style="display: none;">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center p-3 bg-light rounded border">
-                                <div>
-                                    <h4 class="mb-0" id="currentFileName">
-                                        <i class="fas fa-file-audio text-primary me-2"></i>
-                                        <span id="fileNameText">Recording</span>
-                                    </h4>
-                                </div>
-                                <div>
-                                    <button type="button" class="btn btn-success" id="saveRecordingBtnInline" onclick="showSaveRecordingDialog()" style="display: none;">
-                                        <i class="fas fa-save me-1"></i>Save Recording
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row mb-4" id="audioComparisonSection" style="display: none;">
-                        <div class="col-12">
-                            <div class="card shadow-sm">
-                                <div class="card-header bg-info text-white">
-                                    <h5 class="mb-0"><i class="fas fa-headphones me-2"></i>Audio Playback</h5>
-                                </div>
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3">
-                                            <h6 class="text-muted mb-3"><i class="fas fa-microphone me-2"></i>Original Audio</h6>
-                                            <div id="originalWaveform" class="waveform-container"></div>
-                                            <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
-                                                <span class="text-muted small" id="originalCurrentTime">0:00</span>
-                                                <span class="text-muted small" id="originalDuration">0:00</span>
-                                            </div>
-                                            <div class="text-center">
-                                                <button class="btn btn-sm btn-outline-primary" id="originalPlayBtn" onclick="toggleOriginalPlay()"><i class="fas fa-play"></i></button>
-                                                <button class="btn btn-sm btn-outline-secondary" onclick="stopOriginalAudio()"><i class="fas fa-stop"></i></button>
-                                            </div>
-                                        </div>
-
-                                        <div class="col-md-6 mb-3">
-                                            <h6 class="text-success mb-3"><i class="fas fa-check-circle me-2"></i>Processed Audio</h6>
-                                            <div id="processedWaveform" class="waveform-container"></div>
-                                            <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
-                                                <span class="text-muted small" id="processedCurrentTime">0:00</span>
-                                                <span class="text-muted small" id="processedDuration">0:00</span>
-                                            </div>
-                                            <div class="text-center">
-                                                <button class="btn btn-sm btn-outline-success" id="processedPlayBtn" onclick="toggleProcessedPlay()"><i class="fas fa-play"></i></button>
-                                                <button class="btn btn-sm btn-outline-secondary" onclick="stopProcessedAudio()"><i class="fas fa-stop"></i></button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row" id="resultsSection" style="display: none;">
-                        <div class="col-12">
-                            <div class="card shadow-sm">
-                                <div class="card-header bg-success text-white">
-                                    <h5 class="mb-0"><i class="fas fa-check-circle me-2"></i>Processing Results</h5>
-                                </div>
-                                <div class="card-body">
-                                    <ul class="nav nav-tabs" id="resultTabs" role="tablist">
-                                        <li class="nav-item"><button class="nav-link active" id="transcription-tab" data-bs-toggle="tab" data-bs-target="#transcription" type="button" role="tab"><i class="fas fa-file-alt me-1"></i>Transcription</button></li>
-                                        <li class="nav-item"><button class="nav-link" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab"><i class="fas fa-list-ul me-1"></i>Summary</button></li>
-                                    </ul>
-
-                                    <div class="tab-content mt-3" id="resultTabContent">
-                                        <div class="tab-pane fade show active" id="transcription" role="tabpanel">
-                                            <div class="result-box">
-                                                <div class="d-flex justify-content-between mb-2">
-                                                    <h6><i class="fas fa-align-left me-2"></i>Transcribed Text</h6>
-                                                    <button class="btn btn-sm btn-outline-primary" onclick="copyText('transcriptionText')"><i class="fas fa-copy"></i> Copy</button>
-                                                </div>
-                                                <div id="transcriptionText" class="result-content"><p class="text-muted">Awaiting processing...</p></div>
-                                            </div>
-                                        </div>
-                                        <div class="tab-pane fade" id="summary" role="tabpanel">
-                                            <div class="result-box">
-                                                <div class="d-flex justify-content-between mb-2">
-                                                    <h6><i class="fas fa-compress-alt me-2"></i>Content Summary</h6>
-                                                    <button class="btn btn-sm btn-outline-primary" onclick="copyText('summaryText')"><i class="fas fa-copy"></i> Copy</button>
-                                                </div>
-                                                <div id="summaryText" class="result-content"><p class="text-muted">Summary will appear here...</p></div>
-                                            </div>
-                                        </div>
+                                    <div class="col-6 text-center">
+                                        <h6 class="text-start small fw-bold text-success">POST-PROCESSED SIGNAL</h6>
+                                        <div id="processedWaveform" class="waveform-container"></div>
+                                        <button id="btn-play-processed" class="btn btn-success mt-3" onclick="toggleProcessedPlay()">
+                                            <i class="fas fa-play me-2"></i><span>Play Enhanced</span>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -178,35 +74,48 @@
                     </div>
                 </div>
 
-                <div id="history-view" style="display: none;">
-                    <div class="row mb-4">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h3><i class="fas fa-history me-2"></i>Recording History</h3>
-                                <button class="btn btn-outline-danger btn-sm" onclick="clearAllHistory()"><i class="fas fa-trash me-1"></i>Clear All</button>
+                <div class="row" id="resultsSection" style="display: none;">
+                    <div class="col-12">
+                        <div class="card shadow-sm no-hover">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0">Analysis & Metadata</h5>
                             </div>
-                            
-                            <div class="card shadow-sm mb-3">
-                                <div class="card-body">
-                                    <div class="row g-3">
-                                        <div class="col-md-6">
-                                            <input type="text" class="form-control" id="searchNameInput" placeholder="Search by name..." onkeyup="filterHistory()">
-                                        </div>
-                                        <div class="col-md-6">
-                                            <input type="text" class="form-control" id="searchDateInput" placeholder="Date (DD/MM/YYYY)..." onkeyup="filterHistory()">
-                                        </div>
+                            <div class="card-body p-4">
+                                <ul class="nav nav-tabs mb-4" id="resultTabs">
+                                    <li class="nav-item">
+                                        <button class="nav-link active" id="trans-tab" data-bs-toggle="tab" data-bs-target="#tPane">Transcription</button>
+                                    </li>
+                                    <li class="nav-item">
+                                        <button class="nav-link" id="sum-tab" data-bs-toggle="tab" data-bs-target="#sPane">Summarization</button>
+                                    </li>
+                                </ul>
+                                <div class="tab-content border rounded bg-light p-4">
+                                    <div class="tab-pane fade show active" id="tPane">
+                                        <div id="transcriptionText" class="result-content-box"></div>
+                                    </div>
+                                    <div class="tab-pane fade" id="sPane">
+                                        <div id="summarizationText" class="result-content-box"></div>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <div id="historyContainer">
-                                <div class="text-center text-muted py-5"><i class="fas fa-inbox fa-3x mb-3"></i><p>No recordings yet</p></div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </main>
-        </div>
+            </div>
+
+            <div id="history-view" style="display: none;">
+                <div class="pt-4 pb-3 mb-4 border-bottom">
+                    <h1 class="display-6 fw-bold">Recording Archive</h1>
+                    <p class="text-muted mb-0">Browse historical signal data</p>
+                </div>
+                
+                <div id="historyContainer"></div>
+
+                <nav class="mt-5">
+                    <ul class="pagination justify-content-center" id="historyPagination"></ul>
+                </nav>
+            </div>
+        </main>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
