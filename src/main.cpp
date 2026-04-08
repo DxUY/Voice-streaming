@@ -4,7 +4,7 @@
 
 const char* ssid = "NguyenQuynh";
 const char* password = "Quynh@123";
-const char* udpAddress = "192.168.68.112";
+const char* udpAddress = "192.168.68.120"; // Updated per your ipconfig
 const int udpPort = 9000;
 
 #define BUTTON_PIN 4
@@ -15,17 +15,14 @@ const int udpPort = 9000;
 #define SAMPLE_RATE 16000
 #define UDP_PACKET_SIZE 1024
 
-uint8_t udpBuffer[UDP_PACKET_SIZE + 1]; 
 WiFiUDP udp;
+QueueHandle_t audioQueue;
 bool isRecording = false;
-bool lastButtonState = HIGH;
-unsigned long lastHeartbeat = 0;
 
-void sendControl(uint8_t cmd) {
-    udp.beginPacket(udpAddress, udpPort);
-    udp.write(cmd); 
-    udp.endPacket();
-}
+struct AudioPacket {
+    uint8_t data[UDP_PACKET_SIZE + 1];
+    size_t length;
+};
 
 void init_i2s() {
     i2s_config_t i2s_config = {
@@ -45,47 +42,79 @@ void init_i2s() {
     i2s_set_pin(I2S_PORT, &pin_config);
 }
 
+void networkTask(void *pvParameters) {
+    AudioPacket packet;
+    unsigned long lastHeartbeat = 0;
+
+    while (1) {
+        if (WiFi.status() == WL_CONNECTED) {
+            // Priority 1: Audio Data
+            if (xQueueReceive(audioQueue, &packet, 5 / portTICK_PERIOD_MS) == pdPASS) {
+                udp.beginPacket(udpAddress, udpPort);
+                udp.write(packet.data, packet.length);
+                udp.endPacket();
+                vTaskDelay(2 / portTICK_PERIOD_MS); // Give Wi-Fi stack breathing room
+            }
+
+            // Priority 2: Heartbeat (Every 1s to match JS 3s timeout)
+            if (!isRecording && (millis() - lastHeartbeat > 1000)) {
+                udp.beginPacket(udpAddress, udpPort);
+                udp.write(9); 
+                udp.endPacket();
+                lastHeartbeat = millis();
+            }
+        }
+        vTaskDelay(1); 
+    }
+}
+
+void audioTask(void *pvParameters) {
+    AudioPacket currentPacket;
+    while (1) {
+        if (isRecording) {
+            size_t bytesRead = 0;
+            i2s_read(I2S_PORT, &currentPacket.data[1], UDP_PACKET_SIZE, &bytesRead, portMAX_DELAY);
+            
+            if (bytesRead > 0) {
+                int16_t* samples = (int16_t*)&currentPacket.data[1];
+                int num_samples = bytesRead / 2;
+                int16_t max_val = 0;
+                for(int i=0; i<num_samples; i++) {
+                    if(abs(samples[i]) > max_val) max_val = abs(samples[i]);
+                }
+
+                if (max_val > 300) { // Slightly lower threshold for better sensitivity
+                    currentPacket.data[0] = 0; // Header: Audio
+                    currentPacket.length = bytesRead + 1;
+                    xQueueSend(audioQueue, &currentPacket, 0); 
+                }
+            }
+        } else {
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     WiFi.begin(ssid, password);
     init_i2s();
+    audioQueue = xQueueCreate(15, sizeof(AudioPacket));
+    xTaskCreate(networkTask, "Network", 4096, NULL, 1, NULL);
+    xTaskCreate(audioTask, "Audio", 4096, NULL, 2, NULL); 
 }
 
 void loop() {
-    if (WiFi.status() != WL_CONNECTED) return;
-
+    static bool lastButtonState = HIGH;
     bool btn = digitalRead(BUTTON_PIN);
     if (lastButtonState == HIGH && btn == LOW) {
         isRecording = !isRecording;
-        sendControl(isRecording ? 1 : 2);
-        delay(200);
+        udp.beginPacket(udpAddress, udpPort);
+        udp.write(isRecording ? 1 : 2);
+        udp.endPacket();
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
     lastButtonState = btn;
-
-    if (!isRecording && (millis() - lastHeartbeat > 2000)) {
-        sendControl(9);
-        lastHeartbeat = millis();
-    }
-
-    if (isRecording) {
-        size_t read = 0;
-        i2s_read(I2S_PORT, &udpBuffer[1], UDP_PACKET_SIZE, &read, 0);
-        if (read > 0) {
-            // Simple Hardware VAD: Only send if audio is above noise floor
-            int16_t* samples = (int16_t*)&udpBuffer[1];
-            int num_samples = read / 2;
-            int16_t max_val = 0;
-            for(int i=0; i<num_samples; i++) {
-                if(abs(samples[i]) > max_val) max_val = abs(samples[i]);
-            }
-
-            if (max_val > 500) { // Threshold for INMP441
-                udpBuffer[0] = 0;
-                udp.beginPacket(udpAddress, udpPort);
-                udp.write(udpBuffer, read + 1);
-                udp.endPacket();
-            }
-        }
-    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
 }

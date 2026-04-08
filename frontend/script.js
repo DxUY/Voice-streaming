@@ -1,225 +1,244 @@
 const App = {
+    DEFAULTS: { threshold: 0.6, min_speech_duration_ms: 250, min_silence_duration_ms: 400 },
     state: {
-        socket: null,
+        serverIp: window.location.hostname || "127.0.0.1",
         history: [],
         waves: {},
-        serverIp: window.location.hostname || "127.0.0.1",
-        canvas: null,
-        ctx: null,
-        currentSamples: [],
+        currentSamples: new Int16Array(0),
         currentPage: 1,
         itemsPerPage: 10,
-        isPolling: false
+        isPolling: false,
+        lastSignalTime: Date.now(),
+        vad: { threshold: 0.6, min_speech_duration_ms: 250, min_silence_duration_ms: 400 }
     },
 
-    lastSignalTime: Date.now(),
-    signalChecker: null,
-
     async init() {
-        this.state.canvas = document.getElementById('liveWaveformCanvas');
-        this.state.ctx = this.state.canvas?.getContext('2d');
-        
-        if (this.state.canvas) {
-            this.resizeCanvas();
-            window.addEventListener('resize', () => this.resizeCanvas());
-            this.startAnimationLoop();
-        }
-
-        const waveConfigs = {
-            original: { container: '#originalWaveform', color: '#6c757d' },
-            processed: { container: '#processedWaveform', color: '#198754' }
-        };
-
-        Object.entries(waveConfigs).forEach(([key, cfg]) => {
-            const container = document.querySelector(cfg.container);
-            if (!container) return;
-            
-            this.state.waves[key] = WaveSurfer.create({
-                container: cfg.container,
-                waveColor: cfg.color,
-                progressColor: '#0d6efd',
-                height: 100,
-                barWidth: 2
-            });
-            
-            this.state.waves[key].on('play', () => this.updateBtn(key, true));
-            this.state.waves[key].on('pause', () => this.updateBtn(key, false));
-            this.state.waves[key].on('finish', () => this.updateBtn(key, false));
-        });
-
-        const spectroIds = ['raw', 'clean', 'diff'];
-        spectroIds.forEach(id => {
-            const container = document.getElementById(`spectro-${id}`);
-            if (!container) return;
-            
-            this.state.waves[`spec_${id}`] = WaveSurfer.create({
-                container: container,
-                height: 0,
-                interact: false,
-                plugins: [
-                    WaveSurfer.Spectrogram.create({
-                        labels: false,
-                        height: 200,
-                        fftSize: 2048,
-                        colorMap: id === 'diff' ? this.getIceColorMap() : this.getHotColorMap()
-                    })
-                ]
-            });
-        });
-        
+        this.cacheDOM();
+        this.initWavesurfer();
+        this.bindEvents();
+        this.startAnimationLoop();
         await this.fetchHistory();
         this.connect();
     },
 
-    getHotColorMap() {
-        return Array.from({ length: 256 }, (_, i) => [i / 255, i / 128 > 1 ? 1 : i / 128, 1 - i / 255, 1]);
+    cacheDOM() {
+        this.dom = {
+            canvas: document.getElementById('liveWaveformCanvas'),
+            ctx: document.getElementById('liveWaveformCanvas')?.getContext('2d'),
+            connStatus: document.getElementById('connectionStatus'),
+            historyCont: document.getElementById('historyContainer'),
+            pagination: document.getElementById('historyPagination'),
+            dashView: document.getElementById('dashboard-view'),
+            histView: document.getElementById('history-view'),
+            navDash: document.getElementById('nav-dash'),
+            navHist: document.getElementById('nav-hist'),
+            liveSection: document.getElementById('liveMonitorSection')
+        };
+        this.resizeCanvas();
     },
 
-    getIceColorMap() {
-        return Array.from({ length: 256 }, (_, i) => [0, i / 255, i / 128 > 1 ? 1 : i / 128, 1]);
+    initWavesurfer() {
+        const createWS = (container, color, extra = {}) => WaveSurfer.create({
+            container, waveColor: color, progressColor: '#0d6efd', height: 100, barWidth: 2, ...extra
+        });
+        
+        this.state.waves.original = createWS('#originalWaveform', '#6c757d');
+        this.state.waves.processed = createWS('#processedWaveform', '#198754');
+        
+        ['original', 'processed'].forEach(k => {
+            this.state.waves[k].on('play', () => this.updatePlayBtn(k, true));
+            this.state.waves[k].on('pause', () => this.updatePlayBtn(k, false));
+            this.state.waves[k].on('finish', () => this.updatePlayBtn(k, false));
+        });
+        
+        ['raw', 'clean', 'diff'].forEach(id => {
+            this.state.waves[`spec_${id}`] = WaveSurfer.create({
+                container: `#spectro-${id}`, height: 0, interact: false,
+                plugins: [WaveSurfer.Spectrogram.create({
+                    labels: false, height: 200, fftSize: 2048,
+                    colorMap: id === 'diff' ? this.getColMap('ice') : this.getColMap('hot')
+                })]
+            });
+        });
     },
 
-    updateBtn(key, isPlaying) {
-        const btn = document.getElementById(`btn-play-${key}`);
-        if (!btn) return;
-        btn.querySelector('i').className = `fas fa-${isPlaying ? 'pause' : 'play'} me-2`;
-        btn.querySelector('span').textContent = isPlaying ? 'Pause' : 'Play';
+    bindEvents() {
+        window.addEventListener('resize', () => this.resizeCanvas());
+        
+        document.addEventListener('click', e => {
+            const action = e.target.closest('[data-action]')?.dataset.action;
+            if (action === 'show-dash') this.switchView('dashboard');
+            if (action === 'show-hist') this.switchView('history');
+            if (action === 'show-settings') this.showSettings();
+            if (action === 'reset-settings') this.resetSettings();
+            
+            const playKey = e.target.closest('[data-play]')?.dataset.play;
+            if (playKey) this.state.waves[playKey].playPause();
+        });
+        
+        document.querySelectorAll('.vad-input').forEach(input => {
+            input.oninput = (e) => {
+                const labelMap = { 'threshold': 'val-threshold', 'min_speech_duration_ms': 'val-minSpeech', 'min_silence_duration_ms': 'val-minSilence' };
+                document.getElementById(labelMap[e.target.dataset.key]).textContent = e.target.value;
+            };
+        });
+        
+        document.getElementById('saveSettingsBtn').onclick = () => this.saveSettings();
+    },
+
+    connect() {
+        const socket = new WebSocket(`ws://${this.state.serverIp}:8000/ws`);
+        socket.binaryType = "arraybuffer";
+        
+        socket.onopen = () => this.updateStatus("SERVER CONNECTED", "bg-success");
+        
+        socket.onmessage = (e) => {
+            if (e.data instanceof ArrayBuffer) {
+                // Handle binary audio waveform
+                this.state.currentSamples = new Int16Array(e.data);
+                this.state.lastSignalTime = Date.now();
+                if (!this.dom.connStatus.textContent.match(/RECORDING|READY/)) {
+                    this.updateStatus("LIVE: STABLE", "bg-success");
+                }
+                return;
+            }
+            const data = JSON.parse(e.data);
+            if (data.type === "status" && data.value === "HARDWARE_ONLINE") {
+                 this.updateStatus("HARDWARE READY", "bg-success");
+                 this.state.lastSignalTime = Date.now();
+            }
+            if (data.type === "recording_started") this.updateStatus("RECORDING...", "bg-danger animate-pulse");
+            if (data.type === "task_started") this.pollStatus(data.task_id);
+        };
+
+        setInterval(() => {
+            if (Date.now() - this.state.lastSignalTime > 3000 && socket.readyState === 1) {
+                this.updateStatus("SIGNAL UNSTABLE", "bg-warning text-dark");
+            }
+        }, 2000);
     },
 
     async fetchHistory() {
         try {
             const res = await fetch(`http://${this.state.serverIp}:8000/logs`);
-            const { status, data } = await res.json();
-            if (status === "success") {
-                this.state.history = data;
-                this.renderHistory();
+            const json = await res.json();
+            if (json.status === "success") { 
+                this.state.history = json.data; 
+                this.renderHistory(); 
             }
         } catch (e) { console.error(e); }
     },
 
-    connect() {
-        this.state.socket = new WebSocket(`ws://${this.state.serverIp}:8000/ws`);
+    renderHistory() {
+        const start = (this.state.currentPage - 1) * this.state.itemsPerPage;
+        const items = this.state.history.slice(start, start + this.state.itemsPerPage);
+        const fragment = document.createDocumentFragment();
+        let lastDate = "";
 
-        this.state.socket.onopen = () => this.updateUIStatus("SERVER CONNECTED", "bg-success");
+        if (items.length === 0) {
+            this.dom.historyCont.innerHTML = '<p class="text-center py-5 text-muted">No recordings found.</p>';
+            this.dom.pagination.innerHTML = "";
+            return;
+        }
 
-        this.state.socket.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            switch(data.type) {
-                case "status":
-                    if (data.value === "HARDWARE_ONLINE") {
-                        this.updateUIStatus("HARDWARE READY", "bg-success");
-                        this.lastSignalTime = Date.now();
-                    }
-                    break;
-                case "recording_started":
-                    this.updateUIStatus("RECORDING...", "bg-danger animate-pulse");
-                    break;
-                case "waveform":
-                    this.state.currentSamples = data.samples;
-                    this.updateSignalStatus("STABLE");
-                    break;
-                case "task_started":
-                    this.pollStatus(data.task_id);
-                    break;
+        items.forEach(item => {
+            const d = new Date(item.timestamp);
+            const dateStr = d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            
+            if (dateStr !== lastDate) {
+                const h6 = document.createElement('h6');
+                h6.className = "mt-4 mb-3 text-muted fw-bold text-uppercase";
+                h6.style.letterSpacing = "1px";
+                h6.textContent = dateStr;
+                fragment.appendChild(h6);
+                lastDate = dateStr;
             }
-        };
-
-        this.state.socket.onclose = () => {
-            this.updateUIStatus("SERVER DISCONNECTED", "bg-danger");
-            this.updateSignalStatus("OFFLINE");
-            setTimeout(() => this.connect(), 2000);
-        };
+            
+            const div = document.createElement('div');
+            div.className = "card mb-2 border history-item";
+            div.style.cursor = "pointer";
+            
+            div.innerHTML = `
+                <div class="card-body d-flex justify-content-start align-items-center py-2 text-start">
+                    <i class="fas fa-file-audio text-primary me-3"></i>
+                    <span class="fw-bold">Recording Archive</span>
+                    <span class="mx-3 text-muted">|</span>
+                    <span class="text-secondary small">${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                </div>`;
+                
+            div.onclick = () => this.loadEntry(item);
+            fragment.appendChild(div);
+        });
+        
+        this.dom.historyCont.innerHTML = "";
+        this.dom.historyCont.appendChild(fragment);
+        this.renderPagination();
     },
 
-    updateUIStatus(text, className) {
-        const el = document.getElementById('connectionStatus');
-        if (el) {
-            el.className = `badge ${className}`;
-            el.textContent = text;
-        }
+    resetSettings() {
+        this.state.vad = { ...this.DEFAULTS };
+        const map = { 'input-threshold': this.DEFAULTS.threshold, 'input-minSpeech': this.DEFAULTS.min_speech_duration_ms, 'input-minSilence': this.DEFAULTS.min_silence_duration_ms };
+        Object.entries(map).forEach(([id, val]) => {
+            const input = document.getElementById(id);
+            input.value = val;
+            input.dispatchEvent(new Event('input'));
+        });
     },
 
-    updateSignalStatus(status) {
-        if (status === "STABLE") {
-            this.lastSignalTime = Date.now();
-            const el = document.getElementById('connectionStatus');
-            if (el && !el.textContent.includes("STABLE") && !el.textContent.includes("RECORDING")) {
-                this.updateUIStatus("LIVE: SIGNAL STABLE", "bg-success");
-            }
+    renderPagination() {
+        const pages = Math.ceil(this.state.history.length / this.state.itemsPerPage);
+        
+        if (pages <= 1) {
+            this.dom.pagination.innerHTML = "";
+            return;
         }
 
-        if (!this.signalChecker) {
-            this.signalChecker = setInterval(() => {
-                if (Date.now() - this.lastSignalTime > 1500 && this.state.socket.readyState === 1) {
-                    this.updateUIStatus("SIGNAL UNSTABLE (NO DATA)", "bg-warning text-dark");
-                }
-            }, 2000);
-        }
-    },
-
-    async pollStatus(taskId) {
-        if (this.state.isPolling) return;
-        this.state.isPolling = true;
-
-        const check = async () => {
-            try {
-                const res = await fetch(`http://${this.state.serverIp}:8000/status/${taskId}`);
-                const data = await res.json();
-                if (data.status === 'completed') {
-                    this.state.isPolling = false;
-                    await this.fetchHistory();
-                    this.loadEntry(data.result);
-                } else {
-                    setTimeout(check, 1000);
-                }
-            } catch (e) { this.state.isPolling = false; }
-        };
-        check();
+        this.dom.pagination.innerHTML = Array.from({ length: pages }, (_, i) => {
+            const pageNum = i + 1;
+            const isActive = pageNum === this.state.currentPage;
+            
+            return `
+                <li class="page-item ${isActive ? 'active' : ''}">
+                    <a class="page-link shadow-none" 
+                    href="#" 
+                    ${isActive ? 'aria-current="page"' : ''} 
+                    onclick="App.setPage(event, ${pageNum})">
+                    ${pageNum}
+                    </a>
+                </li>`;
+        }).join('');
     },
 
     loadEntry(entry) {
-        this.switchView('dashboard', true); 
-        const elements = {
-            dashboardHeader: 'none',
-            liveMonitorSection: 'none',
-            spectrogramSection: 'block',
-            audioComparisonSection: 'block',
-            resultsSection: 'block'
-        };
+        this.switchView('dashboard', true);
+        const ids = { 'dashboardHeader':'none', 'liveMonitorSection':'none', 'spectrogramSection':'block', 'audioComparisonSection':'block', 'resultsSection':'block' };
+        Object.entries(ids).forEach(([id, disp]) => document.getElementById(id).style.display = disp);
         
-        Object.entries(elements).forEach(([id, display]) => {
-            const el = document.getElementById(id);
-            if(el) el.style.display = display;
-        });
-
-        document.getElementById('transcriptionText').textContent = entry.transcribe || "No transcription available";
-        document.getElementById('summarizationText').textContent = entry.summarization || "No summary available";
-
-        const baseUrl = `http://${this.state.serverIp}:8000/download`;
-        const getFileName = (path) => path?.split(/[\\/]/).pop() || "";
+        document.getElementById('transcriptionText').textContent = entry.transcribe || "---";
+        document.getElementById('summarizationText').textContent = entry.summary || "---";
         
-        const raw = getFileName(entry.files?.raw_audio);
-        const clean = getFileName(entry.files?.processed_audio);
-
-        if (raw) {
-            this.state.waves.original.load(`${baseUrl}/raw/${raw}`);
-            this.state.waves.spec_raw.load(`${baseUrl}/raw/${raw}`);
-            this.state.waves.spec_diff.load(`${baseUrl}/raw/${raw}`); 
+        const dl = `http://${this.state.serverIp}:8000/download`;
+        const raw = entry.files?.raw_audio?.split(/[\\/]/).pop();
+        const clean = entry.files?.processed_audio?.split(/[\\/]/).pop();
+        
+        if (raw) { 
+            this.state.waves.original.load(`${dl}/raw/${raw}`); 
+            this.state.waves.spec_raw.load(`${dl}/raw/${raw}`); 
+            this.state.waves.spec_diff.load(`${dl}/raw/${raw}`); 
         }
-        if (clean) {
-            this.state.waves.processed.load(`${baseUrl}/clean/${clean}`);
-            this.state.waves.spec_clean.load(`${baseUrl}/clean/${clean}`);
+        if (clean) { 
+            this.state.waves.processed.load(`${dl}/clean/${clean}`); 
+            this.state.waves.spec_clean.load(`${dl}/clean/${clean}`); 
         }
     },
 
     switchView(view, skipReset = false) {
         const isDash = view === 'dashboard';
-        document.getElementById('dashboard-view').style.display = isDash ? 'block' : 'none';
-        document.getElementById('history-view').style.display = isDash ? 'none' : 'block';
+        this.dom.dashView.style.display = isDash ? 'block' : 'none';
+        this.dom.histView.style.display = isDash ? 'none' : 'block';
+        this.dom.navDash.classList.toggle('active', isDash);
+        this.dom.navHist.classList.toggle('active', !isDash);
         
-        document.getElementById('nav-dash').classList.toggle('active', isDash);
-        document.getElementById('nav-hist').classList.toggle('active', !isDash);
-
         if (isDash && !skipReset) {
             ['dashboardHeader', 'liveMonitorSection'].forEach(id => document.getElementById(id).style.display = 'block');
             ['spectrogramSection', 'audioComparisonSection', 'resultsSection'].forEach(id => document.getElementById(id).style.display = 'none');
@@ -227,85 +246,99 @@ const App = {
         }
     },
 
-    renderHistory() {
-        const container = document.getElementById('historyContainer');
-        if (!container) return;
+    async pollStatus(taskId) {
+        if (this.state.isPolling) return;
+        this.state.isPolling = true;
         
-        const items = this.state.history.slice((this.state.currentPage - 1) * this.state.itemsPerPage, this.state.currentPage * this.state.itemsPerPage);
-        const grouped = items.reduce((acc, item) => {
-            const date = item.timestamp ? new Date(item.timestamp).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'Archive';
-            (acc[date] = acc[date] || []).push(item);
-            return acc;
-        }, {});
-
-        container.innerHTML = Object.entries(grouped).map(([date, entries]) => `
-            <h6 class="mt-4 mb-3 text-muted fw-bold text-uppercase" style="letter-spacing:1px">${date}</h6>
-            ${entries.map(item => `
-                <div class="card mb-2 border history-item" style="cursor:pointer" onclick='App.loadEntry(${JSON.stringify(item).replace(/'/g, "&apos;")})'>
-                    <div class="card-body d-flex justify-content-between align-items-center py-2">
-                        <div>
-                            <i class="fas fa-file-audio text-primary me-3"></i>
-                            <span class="fw-bold">Recording Archive</span>
-                            <span class="mx-3 text-muted">|</span>
-                            <span class="text-secondary small">${item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
-                        </div>
-                    </div>
-                </div>`).join('')}
-        `).join('') || '<p class="text-center py-5 text-muted">No recordings found.</p>';
-        
-        this.renderPagination();
-    },
-
-    renderPagination() {
-        const el = document.getElementById('historyPagination');
-        const pages = Math.ceil(this.state.history.length / this.state.itemsPerPage);
-        if (!el || pages <= 1) return (el.innerHTML = '');
-
-        el.innerHTML = Array.from({ length: pages }, (_, i) => `
-            <li class="page-item ${i + 1 === this.state.currentPage ? 'active' : ''}">
-                <a class="page-link shadow-none" href="#" onclick="App.setPage(${i + 1})">${i + 1}</a>
-            </li>`).join('');
-    },
-
-    setPage(p) {
-        this.state.currentPage = p;
-        this.renderHistory();
-        window.scrollTo(0, 0);
-    },
-
-    resizeCanvas() {
-        if (!this.state.canvas) return;
-        this.state.canvas.width = this.state.canvas.parentElement.clientWidth;
-        this.state.canvas.height = 400;
+        const check = async () => {
+            try {
+                const res = await fetch(`http://${this.state.serverIp}:8000/status/${taskId}`);
+                const data = await res.json();
+                if (data.status === 'completed') { 
+                    this.state.isPolling = false; 
+                    await this.fetchHistory(); 
+                    this.loadEntry(data.result); 
+                    this.showToast("Processing Complete", "Audio has been successfully analyzed and transcribed.");
+                } 
+                else setTimeout(check, 1000);
+            } catch (e) { this.state.isPolling = false; }
+        };
+        check();
     },
 
     startAnimationLoop() {
         const draw = () => {
-            if (document.getElementById('liveMonitorSection').style.display !== 'none') {
-                const { ctx, canvas, currentSamples: samples } = this.state;
-                if (ctx && canvas) {
-                    ctx.fillStyle = '#0f172a';
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.strokeStyle = '#22c55e';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    const step = canvas.width / (samples.length || 1);
-                    samples.forEach((s, i) => {
-                        const y = ((s / 32768) * canvas.height / 2) + (canvas.height / 2);
-                        i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * step, y);
-                    });
-                    ctx.stroke();
+            if (this.dom.liveSection.style.display !== 'none' && this.state.currentSamples.length) {
+                const { ctx, canvas } = this.dom;
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                const step = canvas.width / this.state.currentSamples.length;
+                for (let i = 0; i < this.state.currentSamples.length; i++) {
+                    const s = this.state.currentSamples[i];
+                    const y = ((s / 32768) * (canvas.height / 2)) + (canvas.height / 2);
+                    if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * step, y);
                 }
+                ctx.stroke();
             }
             requestAnimationFrame(draw);
         };
         draw();
+    },
+
+    showSettings() {
+        const modal = new bootstrap.Modal('#settingsModal');
+        document.getElementById('input-threshold').value = this.state.vad.threshold;
+        document.getElementById('input-minSpeech').value = this.state.vad.min_speech_duration_ms;
+        document.getElementById('input-minSilence').value = this.state.vad.min_silence_duration_ms;
+        modal.show();
+    },
+
+    async saveSettings() {
+        document.querySelectorAll('.vad-input').forEach(i => {
+            const val = i.value;
+            this.state.vad[i.dataset.key] = i.dataset.key === 'threshold' ? parseFloat(val) : parseInt(val);
+        });
+        
+        await fetch(`http://${this.state.serverIp}:8000/settings`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this.state.vad)
+        });
+        
+        bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+    },
+
+    updateStatus(t, c) { this.dom.connStatus.textContent = t; this.dom.connStatus.className = `badge ${c}`; },
+    
+    updatePlayBtn(k, p) {
+        const btn = document.getElementById(`btn-play-${k}`);
+        btn.querySelector('i').className = `fas fa-${p ? 'pause' : 'play'} me-2`;
+        btn.querySelector('span').textContent = p ? 'Pause' : (k==='original'?'Play Raw':'Play Enhanced');
+    },
+
+    showToast(title, message, type = 'success') {
+        const toastEl = document.getElementById('processingToast');
+        if (!toastEl) return;
+
+        toastEl.querySelector('strong').textContent = title;
+        toastEl.querySelector('.toast-body').textContent = message;
+      
+        const header = toastEl.querySelector('.toast-header');
+        header.className = `toast-header text-white ${type === 'success' ? 'bg-success' : 'bg-danger'}`;
+
+        const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+        toast.show();
+    },
+    
+    setPage(e, p) { e.preventDefault(); this.state.currentPage = p; this.renderHistory(); window.scrollTo(0,0); },
+    resizeCanvas() { if (this.dom.canvas) { this.dom.canvas.width = this.dom.canvas.parentElement.clientWidth; this.dom.canvas.height = 400; } },
+    
+    getColMap(type) {
+        return Array.from({ length: 256 }, (_, i) => type === 'hot' ? [i / 255, i / 128 > 1 ? 1 : i / 128, 1 - i / 255, 1] : [0, i / 255, i / 128 > 1 ? 1 : i / 128, 1]);
     }
 };
-
-const showDashboard = (e) => { e.preventDefault(); App.switchView('dashboard'); };
-const showHistory = (e) => { e.preventDefault(); App.switchView('history'); };
-const toggleOriginalPlay = () => App.state.waves.original.playPause();
-const toggleProcessedPlay = () => App.state.waves.processed.playPause();
 
 document.addEventListener('DOMContentLoaded', () => App.init());

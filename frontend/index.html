@@ -11,14 +11,14 @@
 <body>
     <nav class="navbar navbar-expand navbar-dark bg-primary sticky-top">
         <div class="container-fluid px-5">
-            <a class="navbar-brand" style="cursor:pointer" onclick="showDashboard(event)">
+            <a class="navbar-brand" style="cursor:pointer" data-action="show-dash">
                 <i class="fas fa-microchip me-3"></i>Audio Processing System
             </a>
             <div class="collapse navbar-collapse">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item px-3"><a class="nav-link active" id="nav-dash" onclick="showDashboard(event)">Dashboard</a></li>
-                    <li class="nav-item px-3"><a class="nav-link" id="nav-hist" onclick="showHistory(event)">History</a></li>
-                    <li class="nav-item px-3"><a class="nav-link" id="nav-settings" onclick="showSettings(event)">Settings</a></li>
+                    <li class="nav-item px-3"><a class="nav-link active" id="nav-dash" data-action="show-dash" style="cursor:pointer">Dashboard</a></li>
+                    <li class="nav-item px-3"><a class="nav-link" id="nav-hist" data-action="show-hist" style="cursor:pointer">History</a></li>
+                    <li class="nav-item px-3"><a class="nav-link" id="nav-settings" data-action="show-settings" style="cursor:pointer">Settings</a></li>
                 </ul>
             </div>
         </div>
@@ -87,14 +87,14 @@
                                     <div class="col-6 border-end text-center">
                                         <h6 class="text-start small fw-bold">RAW INPUT DATA</h6>
                                         <div id="originalWaveform" class="waveform-container"></div>
-                                        <button id="btn-play-original" class="btn btn-outline-primary mt-3" onclick="toggleOriginalPlay()">
+                                        <button id="btn-play-original" class="btn btn-outline-primary mt-3" data-play="original">
                                             <i class="fas fa-play me-2"></i><span>Play Raw</span>
                                         </button>
                                     </div>
                                     <div class="col-6 text-center">
                                         <h6 class="text-start small fw-bold text-success">POST-PROCESSED SIGNAL</h6>
                                         <div id="processedWaveform" class="waveform-container"></div>
-                                        <button id="btn-play-processed" class="btn btn-success mt-3" onclick="toggleProcessedPlay()">
+                                        <button id="btn-play-processed" class="btn btn-success mt-3" data-play="processed">
                                             <i class="fas fa-play me-2"></i><span>Play Enhanced</span>
                                         </button>
                                     </div>
@@ -113,10 +113,10 @@
                             <div class="card-body p-4">
                                 <ul class="nav nav-tabs mb-4" id="resultTabs">
                                     <li class="nav-item">
-                                        <button class="nav-link active" id="trans-tab" data-bs-toggle="tab" data-bs-target="#tPane">Transcription</button>
+                                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tPane">Transcription</button>
                                     </li>
                                     <li class="nav-item">
-                                        <button class="nav-link" id="sum-tab" data-bs-toggle="tab" data-bs-target="#sPane">Summarization</button>
+                                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sPane">Summarization</button>
                                     </li>
                                 </ul>
                                 <div class="tab-content border rounded bg-light p-4">
@@ -144,6 +144,55 @@
                 </nav>
             </div>
         </main>
+    </div>
+
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="fas fa-sliders-h me-2"></i>Configuration</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <label class="form-label d-flex justify-content-between">
+                            Speech Threshold <span id="val-threshold" class="badge bg-primary">0.6</span>
+                        </label>
+                        <input type="range" class="form-range vad-input" id="input-threshold" data-key="threshold" min="0.1" max="0.9" step="0.05" value="0.6">
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label d-flex justify-content-between">
+                            Min Speech Duration (ms) <span id="val-minSpeech" class="badge bg-primary">250</span>
+                        </label>
+                        <input type="range" class="form-range vad-input" id="input-minSpeech" data-key="min_speech_duration_ms" min="100" max="1000" step="50" value="250">
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label d-flex justify-content-between">
+                            Min Silence Duration (ms) <span id="val-minSilence" class="badge bg-primary">400</span>
+                        </label>
+                        <input type="range" class="form-range vad-input" id="input-minSilence" data-key="min_silence_duration_ms" min="100" max="2000" step="100" value="400">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-action="reset-settings">Reset to Default</button>
+                    <button type="button" class="btn btn-primary" id="saveSettingsBtn">Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="processingToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header bg-success text-white">
+                <i class="fas fa-check-circle me-2"></i>
+                <strong class="me-auto">Processing Complete</strong>
+                <small>Just now</small>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" onclick="hideToast()"></button>
+            </div>
+            <div class="toast-body">
+                Audio has been successfully processed and transcribed.
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
