@@ -26,3 +26,7 @@ ENV/
 backend/recordings/
 *.wav
 *.mp3
+
+backend/Summarization/fine_tuned/
+*.pt
+*.pth

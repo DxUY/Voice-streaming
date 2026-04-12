@@ -183,14 +183,13 @@
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3">
         <div id="processingToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="toast-header bg-success text-white">
-                <i class="fas fa-check-circle me-2"></i>
-                <strong class="me-auto">Processing Complete</strong>
-                <small>Just now</small>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" onclick="hideToast()"></button>
+            <div class="toast-header bg-info text-white">
+                <i class="fas fa-cog fa-spin me-2"></i>
+                <strong class="me-auto">Processing Audio</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
             </div>
             <div class="toast-body">
-                Audio has been successfully processed and transcribed.
+                Waiting for AI response...
             </div>
         </div>
     </div>

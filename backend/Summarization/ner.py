@@ -1,5 +1,6 @@
 import spacy
 
+#pretrained natural language processing (NLP) pipeline
 nlp = spacy.load("en_core_web_sm")
 
 def extract_entities(text):

@@ -1,6 +1,6 @@
 from preprocess import clean_text
 from model import Summarizer
-from postprocess import format_summary
+from postprocess import postprocess
 
 class SummarizationPipeline:
     def __init__(self):
@@ -22,6 +22,6 @@ class SummarizationPipeline:
 
         raw_summary = self.summarizer.summarize(cleaned_text)
 
-        final_summary = format_summary(raw_summary)
+        final_summary = postprocess(raw_summary)
         
         return final_summary

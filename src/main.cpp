@@ -4,13 +4,13 @@
 
 const char* ssid = "NguyenQuynh";
 const char* password = "Quynh@123";
-const char* udpAddress = "192.168.68.120"; // Updated per your ipconfig
+const char* udpAddress = "192.168.68.109";
 const int udpPort = 9000;
 
-#define BUTTON_PIN 4
-#define I2S_SD 13
-#define I2S_WS 11
-#define I2S_SCK 12
+#define BUTTON_PIN 20
+#define I2S_SD 46
+#define I2S_WS 39
+#define I2S_SCK 40
 #define I2S_PORT I2S_NUM_0
 #define SAMPLE_RATE 16000
 #define UDP_PACKET_SIZE 1024
@@ -48,28 +48,26 @@ void networkTask(void *pvParameters) {
 
     while (1) {
         if (WiFi.status() == WL_CONNECTED) {
-            // Priority 1: Audio Data
             if (xQueueReceive(audioQueue, &packet, 5 / portTICK_PERIOD_MS) == pdPASS) {
                 udp.beginPacket(udpAddress, udpPort);
                 udp.write(packet.data, packet.length);
                 udp.endPacket();
-                vTaskDelay(2 / portTICK_PERIOD_MS); // Give Wi-Fi stack breathing room
             }
 
-            // Priority 2: Heartbeat (Every 1s to match JS 3s timeout)
-            if (!isRecording && (millis() - lastHeartbeat > 1000)) {
+            if (!isRecording && (millis() - lastHeartbeat > 2000)) {
                 udp.beginPacket(udpAddress, udpPort);
-                udp.write(9); 
+                udp.write(9);
                 udp.endPacket();
                 lastHeartbeat = millis();
             }
         }
-        vTaskDelay(1); 
+        vTaskDelay(1);
     }
 }
 
 void audioTask(void *pvParameters) {
     AudioPacket currentPacket;
+    
     while (1) {
         if (isRecording) {
             size_t bytesRead = 0;
@@ -79,18 +77,19 @@ void audioTask(void *pvParameters) {
                 int16_t* samples = (int16_t*)&currentPacket.data[1];
                 int num_samples = bytesRead / 2;
                 int16_t max_val = 0;
+                
                 for(int i=0; i<num_samples; i++) {
                     if(abs(samples[i]) > max_val) max_val = abs(samples[i]);
                 }
 
-                if (max_val > 300) { // Slightly lower threshold for better sensitivity
-                    currentPacket.data[0] = 0; // Header: Audio
+                if (max_val > 500) { 
+                    currentPacket.data[0] = 0;
                     currentPacket.length = bytesRead + 1;
-                    xQueueSend(audioQueue, &currentPacket, 0); 
+                    xQueueSend(audioQueue, &currentPacket, 0);
                 }
             }
         } else {
-            vTaskDelay(100 / portTICK_PERIOD_MS);
+            vTaskDelay(50 / portTICK_PERIOD_MS);
         }
     }
 }
@@ -100,7 +99,9 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     WiFi.begin(ssid, password);
     init_i2s();
+    
     audioQueue = xQueueCreate(15, sizeof(AudioPacket));
+    
     xTaskCreate(networkTask, "Network", 4096, NULL, 1, NULL);
     xTaskCreate(audioTask, "Audio", 4096, NULL, 2, NULL); 
 }
@@ -108,6 +109,7 @@ void setup() {
 void loop() {
     static bool lastButtonState = HIGH;
     bool btn = digitalRead(BUTTON_PIN);
+    
     if (lastButtonState == HIGH && btn == LOW) {
         isRecording = !isRecording;
         udp.beginPacket(udpAddress, udpPort);
