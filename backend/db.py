@@ -9,7 +9,8 @@ client = AsyncIOMotorClient(MONGO_DETAILS)
 db = client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-async def save_audio_log(raw_path, clean_path, transcript, summary=""):
+# Updated save_audio_log in db.py
+async def save_audio_log(raw_path, clean_path, transcript, summary="", metrics=None, **kwargs):
     log_entry = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc),
         "files": {
@@ -18,8 +19,13 @@ async def save_audio_log(raw_path, clean_path, transcript, summary=""):
         },
         "transcribe": transcript,
         "summarization": summary,
-        "version": 1.0
+        "metrics": metrics or {},  # Store the latency data here
+        "version": 1.1            # Bumped version for new schema
     }
+
+    # If you ever pass other random arguments, they'll be caught in kwargs
+    if kwargs:
+        log_entry["metadata"] = kwargs
 
     try:
         result = await collection.insert_one(log_entry)
@@ -28,7 +34,7 @@ async def save_audio_log(raw_path, clean_path, transcript, summary=""):
     except Exception as e:
         print(f"Error saving to MongoDB: {e}")
         return None
-
+    
 async def get_all_logs():
     try:
         cursor = collection.find().sort("timestamp", -1)

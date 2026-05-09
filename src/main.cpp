@@ -1,10 +1,11 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <driver/i2s.h>
+#include "esp_vad.h"
 
-const char* ssid = "NguyenQuynh";
-const char* password = "Quynh@123";
-const char* udpAddress = "192.168.68.109";
+const char* ssid = "PTIT.HCM_SV";
+const char* password = "";
+const char* udpAddress = "10.241.9.158";
 const int udpPort = 9000;
 
 #define BUTTON_PIN 20
@@ -17,7 +18,7 @@ const int udpPort = 9000;
 
 WiFiUDP udp;
 QueueHandle_t audioQueue;
-bool isRecording = false;
+volatile bool systemActive = false; 
 
 struct AudioPacket {
     uint8_t data[UDP_PACKET_SIZE + 1];
@@ -45,7 +46,6 @@ void init_i2s() {
 void networkTask(void *pvParameters) {
     AudioPacket packet;
     unsigned long lastHeartbeat = 0;
-
     while (1) {
         if (WiFi.status() == WL_CONNECTED) {
             if (xQueueReceive(audioQueue, &packet, 5 / portTICK_PERIOD_MS) == pdPASS) {
@@ -53,10 +53,9 @@ void networkTask(void *pvParameters) {
                 udp.write(packet.data, packet.length);
                 udp.endPacket();
             }
-
-            if (!isRecording && (millis() - lastHeartbeat > 2000)) {
+            if (!systemActive && (millis() - lastHeartbeat > 2000)) {
                 udp.beginPacket(udpAddress, udpPort);
-                udp.write(9);
+                udp.write(9); // HEARTBEAT
                 udp.endPacket();
                 lastHeartbeat = millis();
             }
@@ -67,25 +66,35 @@ void networkTask(void *pvParameters) {
 
 void audioTask(void *pvParameters) {
     AudioPacket currentPacket;
-    
+    vad_handle_t vad_inst = vad_create(VAD_MODE_3); 
+    bool was_speaking = false;
+
     while (1) {
-        if (isRecording) {
+        if (systemActive) {
             size_t bytesRead = 0;
-            i2s_read(I2S_PORT, &currentPacket.data[1], UDP_PACKET_SIZE, &bytesRead, portMAX_DELAY);
+            i2s_read(I2S_PORT, &currentPacket.data[1], 320, &bytesRead, portMAX_DELAY);
             
             if (bytesRead > 0) {
-                int16_t* samples = (int16_t*)&currentPacket.data[1];
-                int num_samples = bytesRead / 2;
-                int16_t max_val = 0;
+                vad_state_t state = vad_process(vad_inst, (int16_t*)&currentPacket.data[1], SAMPLE_RATE, 10);
                 
-                for(int i=0; i<num_samples; i++) {
-                    if(abs(samples[i]) > max_val) max_val = abs(samples[i]);
-                }
-
-                if (max_val > 500) { 
-                    currentPacket.data[0] = 0;
+                if (state == VAD_SPEECH) {
+                    if (!was_speaking) {
+                        udp.beginPacket(udpAddress, udpPort);
+                        udp.write(1); 
+                        udp.endPacket();
+                        was_speaking = true;
+                    }
+                    
+                    currentPacket.data[0] = 0; // Audio Header
                     currentPacket.length = bytesRead + 1;
                     xQueueSend(audioQueue, &currentPacket, 0);
+                } else {
+                    if (was_speaking) {
+                        udp.beginPacket(udpAddress, udpPort);
+                        udp.write(2); 
+                        udp.endPacket();
+                        was_speaking = false;
+                    }
                 }
             }
         } else {
@@ -99,24 +108,19 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     WiFi.begin(ssid, password);
     init_i2s();
-    
-    audioQueue = xQueueCreate(15, sizeof(AudioPacket));
-    
-    xTaskCreate(networkTask, "Network", 4096, NULL, 1, NULL);
-    xTaskCreate(audioTask, "Audio", 4096, NULL, 2, NULL); 
+    audioQueue = xQueueCreate(20, sizeof(AudioPacket));
+    xTaskCreate(networkTask, "Network", 4096, NULL, 2, NULL);
+    xTaskCreate(audioTask, "Audio", 4096, NULL, 1, NULL); 
 }
 
 void loop() {
     static bool lastButtonState = HIGH;
     bool btn = digitalRead(BUTTON_PIN);
-    
     if (lastButtonState == HIGH && btn == LOW) {
-        isRecording = !isRecording;
-        udp.beginPacket(udpAddress, udpPort);
-        udp.write(isRecording ? 1 : 2);
-        udp.endPacket();
+        systemActive = !systemActive; // Toggle "Listen" mode
+        Serial.printf("System %s\n", systemActive ? "Active" : "Idle");
         vTaskDelay(200 / portTICK_PERIOD_MS);
     }
     lastButtonState = btn;
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    vTaskDelay(10);
 }
