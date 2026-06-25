@@ -107,12 +107,13 @@ const App = {
 
     connect() {
         this.state.socket = new WebSocket(`ws://${this.state.serverIp}:8000/ws`);
-        this.state.socket.binaryType = "arraybuffer";
-        this.state.socket.onopen = () => this.updateStatusUI("SERVER CONNECTED", "bg-success");
+        this.state.socket.onopen = () => this.updateStatusUI("SERVER CONNECTED", "bg-primary");
+        
         this.state.socket.onmessage = (e) => {
             if (e.data instanceof ArrayBuffer) return this.handleBinary(e.data);
             this.handleJson(JSON.parse(e.data));
         };
+        
         this.state.socket.onclose = () => {
             this.updateStatusUI("SERVER DISCONNECTED", "bg-danger");
             setTimeout(() => this.connect(), 2000);
@@ -131,6 +132,13 @@ const App = {
     },
 
     handleJson(data) {
+        // Handle new handshake status
+        if (data.type === "status" && data.value === "HARDWARE_ONLINE") {
+            UI.toast("System", "Hardware is ready to stream.", "success");
+            this.updateStatusUI("SYSTEM READY", "bg-success");
+        }
+        
+        // Handle task completion
         if (data.type === "task_completed") {
             UI.toast("Done", "Audio enhanced successfully.", "success");
             this.fetchHistory();
@@ -240,23 +248,44 @@ const App = {
     },
 
     renderHistory() {
-        if (!this.dom.history) return;
-        this.dom.history.innerHTML = this.state.history.map(item => `
-            <div class="card mb-2 border history-item" style="cursor:pointer" onclick='App.loadEntry(${JSON.stringify(item).replace(/'/g, "&apos;")})'>
-                <div class="card-body">Recording: ${new Date(item.timestamp).toLocaleString()}</div>
-            </div>
-        `).join('');
+        const container = document.getElementById('historyContainer');
+        if (!container) return;
+        
+        const items = this.state.history.slice((this.state.currentPage - 1) * this.state.itemsPerPage, this.state.currentPage * this.state.itemsPerPage);
+        const grouped = items.reduce((acc, item) => {
+            const date = item.timestamp ? new Date(item.timestamp).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'Archive';
+            (acc[date] = acc[date] || []).push(item);
+            return acc;
+        }, {});
+
+        container.innerHTML = Object.entries(grouped).map(([date, entries]) => `
+            <h6 class="mt-4 mb-3 text-muted fw-bold text-uppercase" style="letter-spacing:1px">${date}</h6>
+            ${entries.map(item => `
+                <div class="card mb-2 border history-item" style="cursor:pointer" onclick='App.loadEntry(${JSON.stringify(item).replace(/'/g, "&apos;")})'>
+                    <div class="card-body d-flex justify-content-between align-items-center py-2">
+                        <div>
+                            <i class="fas fa-file-audio text-primary me-3"></i>
+                            <span class="fw-bold">Recording Archive</span>
+                            <span class="mx-3 text-muted">|</span>
+                            <span class="text-secondary small">${item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
+                        </div>
+                    </div>
+                </div>`).join('')}
+        `).join('') || '<p class="text-center py-5 text-muted">No recordings found.</p>';
+        
+        // this.renderPagination();
     },
 
     bindEvents() {
         document.addEventListener('click', e => {
-            const btn = e.target.closest('[data-action]');
+            const btn = e.target.closest('[data-action], [data-play]');
             if (!btn) return;
-            const { action } = btn.dataset;
+            const { action, play } = btn.dataset;
             if (action === 'save-settings') this.saveSettings();
             if (action === 'show-dash') this.switchView('dashboard', false);
             if (action === 'show-hist') this.switchView('history', false);
             if (action === 'show-settings') this.showSettings();
+            if (play) return this.state.waves[play]?.playPause();
         });
     }
 };

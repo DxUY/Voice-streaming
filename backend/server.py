@@ -1,31 +1,32 @@
 import asyncio
-import socket
 import json
 import uuid
 import wave
-import sys
-import torch
 import time
+import logging
+import sys
+from pathlib import Path
+
 import numpy as np
 import soundfile as sf
-import logging
+import torch
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import librosa
-import librosa.display
-from pathlib import Path
-from fastapi import FastAPI, WebSocket, UploadFile, File
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
-# Setup Logs
+# Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Paths ---
 BASE_DIR = Path(__file__).resolve().parent
+
+# CRITICAL FIX: Retain system routing lookups so sub-modules can bind sibling components
 sys.path.append(str(BASE_DIR / "ClearSpeech"))
 sys.path.append(str(BASE_DIR / "Summarization"))
 
@@ -37,16 +38,18 @@ UPLOAD_DIR = BASE_DIR / "recordings"
 RAW_DIR, CLEAN_DIR, SPECS_DIR = UPLOAD_DIR / "raw", UPLOAD_DIR / "clean", BASE_DIR / "specs"
 for d in [RAW_DIR, CLEAN_DIR, SPECS_DIR]: d.mkdir(parents=True, exist_ok=True)
 
-# --- AI Models ---
+# Load Silero VAD Model
+vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', trust_repo=True)
+(get_speech_timestamps, _, _, _, _) = utils
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 pipeline = EnhancementPipeline(
-    cnn_checkpoint_path=str(BASE_DIR/"ClearSpeech/enhancement_model/checkpoints/best_model.pt"),
+    cnn_checkpoint_path=str(BASE_DIR / "ClearSpeech/enhancement_model/checkpoints/best_model.pt"),
     whisper_model_name="base",
     device=device
 )
 summarization_pipeline = SummarizationPipeline()
 
-# --- Helpers ---
 class ExecutionTracker:
     def __init__(self, task_id):
         self.task_id = task_id
@@ -57,7 +60,6 @@ class ExecutionTracker:
         logger.info(f"Task {self.task_id} - Stage: {stage} at {self.metrics[stage]}s")
 
 def save_spectrogram(audio_path, output_path, title):
-    logger.info(f"Đang vẽ spectrogram: {title}")
     try:
         y, sr = librosa.load(audio_path, sr=16000)
         S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128)
@@ -116,20 +118,40 @@ class AppStateManager:
 
 manager = AppStateManager()
 
-async def process_audio_ai(task_id, buffer_list):
+# 💡 HIGH-PERFORMANCE WORKER: Reads directly from disk path to prevent 2-channel mutations
+async def process_audio_ai(task_id, target_file_path):
     tracker = ExecutionTracker(task_id)
-    raw_path, clean_path = RAW_DIR / f"raw_{task_id}.wav", CLEAN_DIR / f"clean_{task_id}.wav"
+    clean_path = CLEAN_DIR / f"clean_{task_id}.wav"
+    raw_path = Path(target_file_path)
+    
     try:
-        audio_np = np.array(buffer_list, dtype=np.int16)
+        audio_np, sr = sf.read(str(raw_path), dtype='int16')
+        audio_tensor = torch.from_numpy(audio_np.astype(np.float32) / 32768.0)
+        
+        speech_timestamps = get_speech_timestamps(
+            audio_tensor, vad_model, threshold=0.6, sampling_rate=16000
+        )
+        
+        if not speech_timestamps:
+            manager.tasks[task_id] = {"status": "completed", "result": {"transcribe": "", "summarization": "Filtered as silence"}}
+            return
+
+        start_sample = speech_timestamps[0]['start']
+        end_sample = speech_timestamps[-1]['end']
+        trimmed_audio = audio_np[start_sample:end_sample]
+
         tracker.mark("pre_processing")
+        
         with wave.open(str(raw_path), 'wb') as wf:
-            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000); wf.writeframes(audio_np.tobytes())
+            wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+            wf.writeframes(trimmed_audio.tobytes())
         
         res = await asyncio.to_thread(pipeline.process, str(raw_path))
         tracker.mark("enhancement_and_transcription")
+        
         sf.write(str(clean_path), res["enhanced_audio"], 16000)
         
-        generate_visuals(task_id, raw_path, clean_path)
+        await asyncio.to_thread(generate_visuals, task_id, raw_path, clean_path)
         
         summary = await asyncio.to_thread(summarization_pipeline.run, res["transcript"]) if res["transcript"] else ""
         tracker.mark("summarization_complete")
@@ -149,6 +171,7 @@ async def process_audio_ai(task_id, buffer_list):
         }
         manager.tasks[task_id] = {"status": "completed", "result": result}
         await manager.broadcast({"type": "task_completed", "task_id": task_id, "result": result})
+        
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}", exc_info=True)
         manager.tasks[task_id] = {"status": "failed", "error": str(e)}
@@ -158,11 +181,29 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
-    task_id = str(uuid.uuid4()); path = RAW_DIR / f"raw_{task_id}.wav"
-    with open(path, "wb") as b: b.write(await file.read())
-    data, _ = sf.read(str(path), dtype='int16')
+    task_id = str(uuid.uuid4())
+    path = RAW_DIR / f"raw_{task_id}.wav"
+    
+    file_bytes = await file.read()
+    
+    # 💡 ACCURATE STEREOMIXING: Runs entirely in a thread-pool worker to protect the loop
+    def save_and_clean_audio_file():
+        with open(path, "wb") as b: 
+            b.write(file_bytes)
+        
+        data, sr = sf.read(str(path), dtype='int16')
+        
+        # High-Fidelity Energy Peak Dominance Downmixing (Prevents digital noise mutations & muddy cancellations)
+        if len(data.shape) > 1:
+            logger.info(f"Processing 2-channel audio safely ({data.shape[1]} channels). Normalizing matrix...")
+            data = np.where(np.abs(data[:, 0]) > np.abs(data[:, 1]), data[:, 0], data[:, 1])
+            sf.write(str(path), data, sr)
+            
+    await asyncio.to_thread(save_and_clean_audio_file)
+    
     manager.tasks[task_id] = {"status": "processing"}
-    asyncio.create_task(process_audio_ai(task_id, data.tolist()))
+    # Pass path string instead of lists to stop socket-blocking serialization lag
+    asyncio.create_task(process_audio_ai(task_id, str(path)))
     return {"status": "success", "task_id": task_id}
 
 @app.get("/logs")
@@ -170,27 +211,60 @@ async def fetch_logs(): return {"status": "success", "data": await get_all_logs(
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    await ws.accept(); manager.clients.add(ws)
+    await ws.accept()
+    manager.clients.add(ws)
     try:
-        while True: await ws.receive_text()
-    finally: manager.clients.discard(ws)
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        logger.info("WebSocket connection closed normally by the client.")
+    except Exception as e:
+        logger.error(f"WebSocket error encountered: {e}")
+    finally:
+        manager.clients.discard(ws)
 
 app.mount("/download/raw", StaticFiles(directory=str(RAW_DIR)), name="raw_audio")
 app.mount("/download/clean", StaticFiles(directory=str(CLEAN_DIR)), name="clean_audio")
 app.mount("/download/specs", StaticFiles(directory=str(SPECS_DIR)), name="specs")
 
 async def udp_listener():
+    import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 9000)); sock.setblocking(False)
+    sock.bind(("0.0.0.0", 9000))
+    sock.setblocking(False)
+    
     while True:
         try:
             data, addr = await asyncio.get_event_loop().sock_recvfrom(sock, 4096)
-            if data[0] == 2:
+            header = data[0]
+            
+            if header == 9: 
+                logger.info("ESP32 Handshake Received: Hardware Online")
+                await manager.broadcast({"type": "status", "value": "HARDWARE_ONLINE"})
+            elif header == 1: # START
+                manager.is_recording = True
+                manager.current_buffer = [] 
+            elif header == 0: # AUDIO DATA
+                if manager.is_recording:
+                    manager.current_buffer.extend(np.frombuffer(data[1:], dtype=np.int16))
+            elif header == 2: # STOP
                 manager.is_recording = False
                 tid = str(uuid.uuid4())
-                asyncio.create_task(process_audio_ai(tid, list(manager.current_buffer)))
-        except: await asyncio.sleep(0.01)
-
+                
+                # Instantly unburden streaming arrays straight to disk before launching heavy inference jobs
+                stream_path = RAW_DIR / f"raw_{tid}.wav"
+                with wave.open(str(stream_path), 'wb') as wf:
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(16000)
+                    wf.writeframes(np.array(manager.current_buffer, dtype=np.int16).tobytes())
+                    
+                asyncio.create_task(process_audio_ai(tid, str(stream_path)))
+                await manager.broadcast({"type": "task_started", "task_id": tid})
+        except (BlockingIOError, InterruptedError):
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.error(f"Unexpected error in UDP stream listener: {e}")
+            await asyncio.sleep(0.1)
+            
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     udp_task = asyncio.create_task(udp_listener())

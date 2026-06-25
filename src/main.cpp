@@ -1,11 +1,10 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <driver/i2s.h>
-#include "esp_vad.h"
 
 const char* ssid = "PTIT.HCM_SV";
 const char* password = "";
-const char* udpAddress = "10.241.9.158";
+const char* udpAddress = "10.241.7.167";
 const int udpPort = 9000;
 
 #define BUTTON_PIN 20
@@ -15,6 +14,7 @@ const int udpPort = 9000;
 #define I2S_PORT I2S_NUM_0
 #define SAMPLE_RATE 16000
 #define UDP_PACKET_SIZE 1024
+#define ENERGY_THRESHOLD 500 
 
 WiFiUDP udp;
 QueueHandle_t audioQueue;
@@ -39,25 +39,39 @@ void init_i2s() {
     i2s_pin_config_t pin_config = {
         .bck_io_num = I2S_SCK, .ws_io_num = I2S_WS, .data_out_num = -1, .data_in_num = I2S_SD
     };
-    i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-    i2s_set_pin(I2S_PORT, &pin_config);
+    if (i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL) != ESP_OK) Serial.println("I2S Driver ERR");
+    if (i2s_set_pin(I2S_PORT, &pin_config) != ESP_OK) Serial.println("I2S Pins ERR");
+    else Serial.println("I2S Initialized.");
 }
 
 void networkTask(void *pvParameters) {
     AudioPacket packet;
     unsigned long lastHeartbeat = 0;
+    
     while (1) {
         if (WiFi.status() == WL_CONNECTED) {
-            if (xQueueReceive(audioQueue, &packet, 5 / portTICK_PERIOD_MS) == pdPASS) {
+            // --- HEARTBEAT LOGIC: Re-announce every 2000ms ---
+            if (millis() - lastHeartbeat > 2000) {
                 udp.beginPacket(udpAddress, udpPort);
-                udp.write(packet.data, packet.length);
-                udp.endPacket();
-            }
-            if (!systemActive && (millis() - lastHeartbeat > 2000)) {
-                udp.beginPacket(udpAddress, udpPort);
-                udp.write(9); // HEARTBEAT
+                udp.write(9); // Handshake signal
                 udp.endPacket();
                 lastHeartbeat = millis();
+            }
+
+            // Process audio packets from the queue
+            if (xQueueReceive(audioQueue, &packet, 5 / portTICK_PERIOD_MS) == pdPASS) {
+                if (udp.beginPacket(udpAddress, udpPort)) {
+                    udp.write(packet.data, packet.length);
+                    udp.endPacket();
+                }
+            }
+        } else {
+            static unsigned long last_warn = 0;
+            if (millis() - last_warn > 3000) {
+                Serial.printf("WiFi Status: %d\n", WiFi.status());
+                last_warn = millis();
+                WiFi.disconnect();
+                WiFi.begin(ssid, password);
             }
         }
         vTaskDelay(1);
@@ -66,61 +80,62 @@ void networkTask(void *pvParameters) {
 
 void audioTask(void *pvParameters) {
     AudioPacket currentPacket;
-    vad_handle_t vad_inst = vad_create(VAD_MODE_3); 
     bool was_speaking = false;
-
     while (1) {
         if (systemActive) {
             size_t bytesRead = 0;
             i2s_read(I2S_PORT, &currentPacket.data[1], 320, &bytesRead, portMAX_DELAY);
-            
             if (bytesRead > 0) {
-                vad_state_t state = vad_process(vad_inst, (int16_t*)&currentPacket.data[1], SAMPLE_RATE, 10);
+                int16_t *samples = (int16_t*)&currentPacket.data[1];
+                long sum = 0;
+                for (int i = 0; i < (bytesRead/2); i++) sum += abs(samples[i]);
+                int avg = sum / (bytesRead/2);
                 
-                if (state == VAD_SPEECH) {
-                    if (!was_speaking) {
-                        udp.beginPacket(udpAddress, udpPort);
-                        udp.write(1); 
-                        udp.endPacket();
-                        was_speaking = true;
-                    }
-                    
-                    currentPacket.data[0] = 0; // Audio Header
-                    currentPacket.length = bytesRead + 1;
+                if (avg > ENERGY_THRESHOLD) {
+                    if (!was_speaking) { udp.beginPacket(udpAddress, udpPort); udp.write(1); udp.endPacket(); was_speaking = true; }
+                    currentPacket.data[0] = 0; currentPacket.length = bytesRead + 1;
                     xQueueSend(audioQueue, &currentPacket, 0);
-                } else {
-                    if (was_speaking) {
-                        udp.beginPacket(udpAddress, udpPort);
-                        udp.write(2); 
-                        udp.endPacket();
-                        was_speaking = false;
-                    }
-                }
+                } else if (was_speaking) { udp.beginPacket(udpAddress, udpPort); udp.write(2); udp.endPacket(); was_speaking = false; }
             }
-        } else {
-            vTaskDelay(50 / portTICK_PERIOD_MS);
         }
+        vTaskDelay(1);
     }
 }
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);
+    Serial.println("\n--- STARTING DIAGNOSTIC BOOT ---");
+    
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
+    
+    int timeout = 0;
+    while (WiFi.status() != WL_CONNECTED && timeout < 30) {
+        delay(500); Serial.print("."); timeout++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nWiFi Connected Successfully!");
+    } else {
+        Serial.println("\nWiFi FAILED.");
+    }
+
     init_i2s();
     audioQueue = xQueueCreate(20, sizeof(AudioPacket));
-    xTaskCreate(networkTask, "Network", 4096, NULL, 2, NULL);
-    xTaskCreate(audioTask, "Audio", 4096, NULL, 1, NULL); 
+    xTaskCreate(networkTask, "Network", 8192, NULL, 2, NULL);
+    xTaskCreate(audioTask, "Audio", 8192, NULL, 1, NULL); 
 }
 
 void loop() {
-    static bool lastButtonState = HIGH;
+    static bool lastBtn = HIGH;
     bool btn = digitalRead(BUTTON_PIN);
-    if (lastButtonState == HIGH && btn == LOW) {
-        systemActive = !systemActive; // Toggle "Listen" mode
-        Serial.printf("System %s\n", systemActive ? "Active" : "Idle");
-        vTaskDelay(200 / portTICK_PERIOD_MS);
+    if (lastBtn == HIGH && btn == LOW) {
+        systemActive = !systemActive;
+        Serial.printf("System Toggled: %s\n", systemActive ? "Active" : "Idle");
+        delay(200);
     }
-    lastButtonState = btn;
-    vTaskDelay(10);
+    lastBtn = btn;
+    delay(10);
 }
